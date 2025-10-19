@@ -8,52 +8,71 @@
         body {
             margin: 0;
             padding: 0;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            background-color: #f5f5f5;
-            font-family: 'Arial', sans-serif;
-        }
-
-        .main-container {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            width: 100%;
-        }
-
-        .avatar-area {
-            width: 400px;
-            height: 500px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 200px 200px 150px 150px;
-            position: relative;
+            width: 100vw;
+            height: 100vh;
             overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+            position: relative;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #main-canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transform-origin: center center;
+        }
+
+        .image-container {
+            position: absolute;
+            transition: all 0.3s ease;
+        }
+
+        .image-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.3s ease;
         }
 
         .controls {
             position: fixed;
             bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
             display: flex;
             gap: 20px;
             align-items: center;
+            z-index: 1000;
         }
 
         .upload-btn {
             padding: 15px 30px;
-            background: #000;
+            background: rgba(255, 255, 255, 0.15);
             color: white;
-            border: none;
+            border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 25px;
             cursor: pointer;
             font-size: 16px;
-            transition: transform 0.2s;
+            transition: all 0.3s ease;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
         .upload-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
             transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.4);
         }
 
         .list-toggle-btn {
@@ -104,17 +123,35 @@
 
         .image-item {
             display: flex;
-            justify-content: space-between;
             align-items: center;
             padding: 10px;
             border-bottom: 1px solid #eee;
+            gap: 10px;
         }
 
         .delete-btn {
             background: none;
             border: none;
-            color: red;
+            color: #ff4444;
             cursor: pointer;
+            padding: 5px;
+            font-size: 16px;
+            min-width: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .delete-btn:hover {
+            background: rgba(255, 68, 68, 0.1);
+            border-radius: 4px;
+        }
+
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         #file-input {
@@ -123,15 +160,15 @@
     </style>
 </head>
 <body>
-    <div class="main-container">
-        <div class="avatar-area" id="avatarArea">
-            <!-- Layered images will be placed here -->
-        </div>
+    <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
     </div>
 
     <div class="controls">
-        <input type="file" id="file-input" accept="image/*" multiple>
-        <button class="upload-btn" onclick="document.getElementById('file-input').click()">UPLOAD</button>
+        <form id="upload-form">
+            <input type="file" id="file-input" accept="image/*" multiple>
+            <button type="button" class="upload-btn" onclick="document.getElementById('file-input').click()">UPLOAD</button>
+        </form>
         <button class="list-toggle-btn" onclick="toggleSidePanel()"></button>
     </div>
 
@@ -142,46 +179,179 @@
         </ul>
     </div>
 
+    <div id="debug-info" style="position: fixed; top: 10px; left: 10px; color: white; z-index: 1000;">
+        <!-- Debug info will be shown here -->
+    </div>
+
     <script>
+        // Load saved images from localStorage
         let uploadedImages = [];
+        let scale = 1;
+        let isDragging = false;
+        let startX, startY, translateX = 0, translateY = 0;
+
+        // Load saved state
+        try {
+            const savedImages = localStorage.getItem('avatarImages');
+            if (savedImages) {
+                const parsed = JSON.parse(savedImages);
+                // Reconstruct Image objects
+                parsed.forEach(imgData => {
+                    const img = new Image();
+                    img.src = imgData.src;
+                    imgData.img = img;
+                    uploadedImages.push(imgData);
+                });
+                updateImageList();
+                updateImagePositions();
+            }
+        } catch (e) {
+            console.error('Error loading saved images:', e);
+        }
+
         const sidePanel = document.getElementById('sidePanel');
         const imageList = document.getElementById('imageList');
         const fileInput = document.getElementById('file-input');
-        const avatarArea = document.getElementById('avatarArea');
+        const canvas = document.getElementById('main-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * 2;  // 2x for retina
+            canvas.height = window.innerHeight * 2;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            ctx.scale(2, 2);  // Scale for retina
+            drawImages();
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Pan and zoom controls
+        canvas.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const delta = e.deltaY;
+            const scaleAmount = delta > 0 ? 0.9 : 1.1;
+            scale *= scaleAmount;
+            scale = Math.min(Math.max(0.1, scale), 5);
+            drawImages();
+        });
+
+        canvas.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (isDragging) {
+                translateX = e.clientX - startX;
+                translateY = e.clientY - startY;
+                drawImages();
+            }
+        });
+
+        canvas.addEventListener('mouseup', function() {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', function() {
+            isDragging = false;
+        });
 
         function toggleSidePanel() {
             sidePanel.classList.toggle('open');
         }
 
-        fileInput.addEventListener('change', function(e) {
-            const files = Array.from(e.target.files);
+        // 3D face layout with z-depth
+        const generateFaceLayout = (images) => {
+            const points = [];
+            const centerX = 0;
+            const centerY = 0;
+            const layers = Math.ceil(images.length / 8);
             
-            files.forEach(file => {
+            for (let layer = 0; layer < layers; layer++) {
+                const radius = 200 + (layer * 50);  // 반경이 점점 커짐
+                const z = -layer * 100;  // z축 깊이
+                const pointsInLayer = 8;
+                
+                for (let i = 0; i < pointsInLayer; i++) {
+                    const angle = (i / pointsInLayer) * Math.PI * 2;
+                    points.push({
+                        x: centerX + Math.cos(angle) * radius,
+                        y: centerY + Math.sin(angle) * radius * 1.2, // 타원형 효과
+                        z: z,
+                        radius: 70 + (Math.random() * 30)
+                    });
+                }
+            }
+            
+            return points;
+        };
+
+        // Save current state to localStorage
+        function saveState() {
+            try {
+                // Create a copy of uploadedImages without the img DOM element
+                const savableImages = uploadedImages.map(({img, ...rest}) => rest);
+                localStorage.setItem('avatarImages', JSON.stringify(savableImages));
+            } catch (e) {
+                console.error('Error saving state:', e);
+            }
+        }
+
+        fileInput.addEventListener('change', function(e) {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (!file.type.startsWith('image/')) continue;
+
                 const reader = new FileReader();
                 
-                reader.onload = function(e) {
-                    const imageData = {
-                        id: Date.now() + Math.random(),
-                        src: e.target.result,
-                        name: file.name
+                reader.onload = function(loadEvent) {
+                    const img = new Image();
+                    
+                    img.onload = function() {
+                        console.log('Image loaded:', file.name); // 디버깅용 로그
+                        
+                        const imageData = {
+                            id: Date.now() + Math.random(),
+                            src: loadEvent.target.result,
+                            name: file.name,
+                            img: img,
+                            x: 0,
+                            y: 0,
+                            z: 0,
+                            rotation: Math.random() * 360,
+                            size: 100
+                        };
+                        
+                        uploadedImages.push(imageData);
+                        console.log('Image added to array:', uploadedImages.length); // 디버깅용 로그
+                        
+                        updateImageList();
+                        updateImagePositions();
+                        drawImages();
+                        saveState();
                     };
                     
-                    uploadedImages.push(imageData);
-                    updateImageList();
-                    addImageLayer(imageData);
+                    img.src = loadEvent.target.result;
                 };
                 
                 reader.readAsDataURL(file);
-            });
+            }
             
-            fileInput.value = ''; // Reset input
+            fileInput.value = '';
         });
 
         function updateImageList() {
             imageList.innerHTML = uploadedImages.map(img => `
                 <li class="image-item">
-                    <span>${img.name}</span>
                     <button class="delete-btn" onclick="deleteImage(${img.id})">×</button>
+                    <span class="file-name">${img.name}</span>
                 </li>
             `).join('');
         }
@@ -191,56 +361,104 @@
             if (index > -1) {
                 uploadedImages.splice(index, 1);
                 updateImageList();
-                updateAvatarLayers();
+                drawImages();
             }
         }
 
-        function addImageLayer(imageData) {
-            const img = document.createElement('img');
-            img.src = imageData.src;
-            img.style.cssText = `
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-                opacity: ${1 / (uploadedImages.length || 1)};
-            `;
-            avatarArea.appendChild(img);
-        }
-
-        function updateAvatarLayers() {
-            avatarArea.innerHTML = '';
+        function updateImagePositions() {
+            const points = generateFaceLayout(uploadedImages);
             uploadedImages.forEach((img, index) => {
-                const imgElement = document.createElement('img');
-                imgElement.src = img.src;
-                imgElement.style.cssText = `
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    object-fit: cover;
-                    opacity: ${1 / (uploadedImages.length || 1)};
-                `;
-                avatarArea.appendChild(imgElement);
+                if (points[index]) {
+                    img.x = points[index].x;
+                    img.y = points[index].y;
+                    img.z = points[index].z;
+                    img.size = points[index].radius;
+                }
             });
         }
 
-        // Mouse wheel event for layer navigation
-        avatarArea.addEventListener('wheel', function(e) {
-            e.preventDefault();
-            const images = Array.from(avatarArea.getElementsByTagName('img'));
-            if (images.length < 2) return;
+        let rotation = 0;
+        let currentZ = 0;
 
-            const delta = Math.sign(e.deltaY);
-            images.forEach((img, index) => {
-                let opacity = parseFloat(img.style.opacity);
-                opacity = Math.max(0.1, Math.min(1, opacity + (delta * 0.1)));
-                img.style.opacity = opacity;
+        function drawImages() {
+            // Debug info update
+            const debugEl = document.getElementById('debug-info');
+            debugEl.textContent = `Images: ${uploadedImages.length} | Scale: ${scale.toFixed(2)} | Z: ${currentZ.toFixed(0)}`;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (uploadedImages.length === 0) {
+                // Draw placeholder text when no images
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Upload images to start', canvas.width/4, canvas.height/4);
+                ctx.restore();
+                return;
+            }
+            
+            // Sort images by z-depth
+            const sortedImages = [...uploadedImages].sort((a, b) => (b.z + currentZ) - (a.z + currentZ));
+            
+            // Apply transformations
+            ctx.save();
+            ctx.translate(canvas.width/4 + translateX, canvas.height/4 + translateY);
+            ctx.scale(scale, scale);
+            
+            // Apply rotation
+            ctx.translate(0, 0);
+            ctx.rotate(rotation * Math.PI / 180);
+            
+            // Draw each image with perspective
+            sortedImages.forEach(img => {
+                try {
+                    const perspective = 1 + ((img.z + currentZ) / 1000);
+                    const size = img.size * perspective;
+                    const x = img.x * perspective;
+                    const y = img.y * perspective;
+                    
+                    ctx.save();
+                    ctx.translate(x, y);
+                    ctx.rotate(img.rotation * Math.PI / 180);
+                    
+                    // Adjust opacity based on z-depth
+                    const opacity = Math.max(0.2, Math.min(0.8, 1 - Math.abs((img.z + currentZ) / 1000)));
+                    ctx.globalAlpha = opacity;
+                    
+                    if (img.img.complete && img.img.naturalWidth > 0) {
+                        ctx.drawImage(img.img, -size/2, -size/2, size, size);
+                    }
+                    ctx.restore();
+                } catch (err) {
+                    console.error('Error drawing image:', err);
+                }
             });
+            
+            ctx.restore();
+        }
+
+        // Enhanced wheel event for 3D navigation
+        canvas.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            
+            if (e.shiftKey) {
+                // Rotate when holding shift
+                rotation += e.deltaY * 0.1;
+            } else {
+                // Move through z-depth normally
+                currentZ += e.deltaY;
+                currentZ = Math.max(-500, Math.min(500, currentZ));
+            }
+            
+            drawImages();
         });
+
+        // Initial draw if there are saved images
+        if (uploadedImages.length > 0) {
+            updateImagePositions();
+            drawImages();
+        }
     </script>
 </body>
 </html>
