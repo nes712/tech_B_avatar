@@ -1,1 +1,246 @@
-THE AVATAR
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THE AVATAR</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f5f5f5;
+            font-family: 'Arial', sans-serif;
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+        }
+
+        .avatar-area {
+            width: 400px;
+            height: 500px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 200px 200px 150px 150px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 40px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .upload-btn {
+            padding: 15px 30px;
+            background: #000;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: transform 0.2s;
+        }
+
+        .upload-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .list-toggle-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: #000;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+
+        .list-toggle-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .list-toggle-btn::before {
+            content: "⋮";
+            color: white;
+            font-size: 24px;
+        }
+
+        .side-panel {
+            position: fixed;
+            right: -300px;
+            top: 0;
+            width: 300px;
+            height: 100vh;
+            background: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .side-panel.open {
+            right: 0;
+        }
+
+        .image-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .image-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .delete-btn {
+            background: none;
+            border: none;
+            color: red;
+            cursor: pointer;
+        }
+
+        #file-input {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="avatar-area" id="avatarArea">
+            <!-- Layered images will be placed here -->
+        </div>
+    </div>
+
+    <div class="controls">
+        <input type="file" id="file-input" accept="image/*" multiple>
+        <button class="upload-btn" onclick="document.getElementById('file-input').click()">UPLOAD</button>
+        <button class="list-toggle-btn" onclick="toggleSidePanel()"></button>
+    </div>
+
+    <div class="side-panel" id="sidePanel">
+        <h3>Uploaded Images</h3>
+        <ul class="image-list" id="imageList">
+            <!-- Uploaded images will be listed here -->
+        </ul>
+    </div>
+
+    <script>
+        let uploadedImages = [];
+        const sidePanel = document.getElementById('sidePanel');
+        const imageList = document.getElementById('imageList');
+        const fileInput = document.getElementById('file-input');
+        const avatarArea = document.getElementById('avatarArea');
+
+        function toggleSidePanel() {
+            sidePanel.classList.toggle('open');
+        }
+
+        fileInput.addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+            
+            files.forEach(file => {
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    const imageData = {
+                        id: Date.now() + Math.random(),
+                        src: e.target.result,
+                        name: file.name
+                    };
+                    
+                    uploadedImages.push(imageData);
+                    updateImageList();
+                    addImageLayer(imageData);
+                };
+                
+                reader.readAsDataURL(file);
+            });
+            
+            fileInput.value = ''; // Reset input
+        });
+
+        function updateImageList() {
+            imageList.innerHTML = uploadedImages.map(img => `
+                <li class="image-item">
+                    <span>${img.name}</span>
+                    <button class="delete-btn" onclick="deleteImage(${img.id})">×</button>
+                </li>
+            `).join('');
+        }
+
+        function deleteImage(id) {
+            const index = uploadedImages.findIndex(img => img.id === id);
+            if (index > -1) {
+                uploadedImages.splice(index, 1);
+                updateImageList();
+                updateAvatarLayers();
+            }
+        }
+
+        function addImageLayer(imageData) {
+            const img = document.createElement('img');
+            img.src = imageData.src;
+            img.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                opacity: ${1 / (uploadedImages.length || 1)};
+            `;
+            avatarArea.appendChild(img);
+        }
+
+        function updateAvatarLayers() {
+            avatarArea.innerHTML = '';
+            uploadedImages.forEach((img, index) => {
+                const imgElement = document.createElement('img');
+                imgElement.src = img.src;
+                imgElement.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                    opacity: ${1 / (uploadedImages.length || 1)};
+                `;
+                avatarArea.appendChild(imgElement);
+            });
+        }
+
+        // Mouse wheel event for layer navigation
+        avatarArea.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const images = Array.from(avatarArea.getElementsByTagName('img'));
+            if (images.length < 2) return;
+
+            const delta = Math.sign(e.deltaY);
+            images.forEach((img, index) => {
+                let opacity = parseFloat(img.style.opacity);
+                opacity = Math.max(0.1, Math.min(1, opacity + (delta * 0.1)));
+                img.style.opacity = opacity;
+            });
+        });
+    </script>
+</body>
+</html>
